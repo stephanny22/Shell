@@ -5,6 +5,8 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <time.h>
+#include <limits.h>
 #include "./libreria/linenoise.h"
 
 #define PROMPT "$ "
@@ -42,6 +44,66 @@ void builtin_cd(char **args, size_t n_args) {
 // Imprime el directorio actual (pwd)
 void builtin_pwd(char **args, size_t n_args) {
     printf("%s\n", CWD);
+}
+
+// Muestra el nombre de usuario actual 
+    void builtin_whoami(char **args, size_t n_args) {
+    char *user = getenv("USER"); 
+    if (user)
+        printf("%s\n", user);
+    else
+        fprintf(stderr, "No se pudo obtener el usuario.\n");
+}
+// Muestra la fecha y hora actual (date)
+void builtin_date(char **args, size_t n_args) {
+    time_t t;
+    struct tm *tmp;
+    char fecha[64];
+
+    t = time(NULL);
+    tmp = localtime(&t);
+    if (tmp == NULL) {
+        perror("localtime");
+        return;
+    }
+
+    if (strftime(fecha, sizeof(fecha), "%Y-%m-%d %H:%M:%S", tmp) == 0) {
+        fprintf(stderr, "Error al formatear la fecha.\n");
+        return;
+    }
+
+    printf("Fecha y hora actual: %s\n", fecha);
+}
+
+// Muestra el tiempo que lleva encendido el sistema (uptime)
+void builtin_uptime(char **args, size_t n_args) {
+    FILE *file = fopen("/proc/uptime", "r");
+    if (!file) {
+        perror("uptime");
+        return;
+    }
+
+    double segundos;
+    if (fscanf(file, "%lf", &segundos) != 1) {
+        fprintf(stderr, "Error al leer /proc/uptime\n");
+        fclose(file);
+        return;
+    }
+
+    fclose(file);
+
+    int dias = segundos / (60 * 60 * 24);
+    int horas = ((int)segundos % (60 * 60 * 24)) / 3600;
+    int minutos = ((int)segundos % 3600) / 60;
+
+    printf("Uptime: %d días, %d horas, %d minutos\n", dias, horas, minutos);
+}
+
+
+
+// Sale del shell (exit)
+void builtin_exit(char **args, size_t n_args) {
+    exit(0);
 }
 
 // Lista archivos y directorios (ls)
@@ -101,14 +163,22 @@ int ejecutar_comando_personalizado(char *cmd, char **args, size_t n_args) {
         builtin_cd(args, n_args);
     } else if (strcmp(cmd, "pwd") == 0) {
         builtin_pwd(args, n_args);
+    } else if (strcmp(cmd, "whoami") == 0) {
+    builtin_whoami(args, n_args);
     } else if (strcmp(cmd, "ls") == 0) {
-        builtin_ls(args, n_args);
+    builtin_ls(args, n_args);
     } else if (strcmp(cmd, "rm") == 0) {
         builtin_rm(args, n_args);
     } else if (strcmp(cmd, "mkdir") == 0) {
         builtin_mkdir(args, n_args);
     } else if (strcmp(cmd, "rmdir") == 0) {
         builtin_rmdir(args, n_args);
+    } else if (strcmp(cmd, "date") == 0) {
+        builtin_date(args, n_args);
+    } else if (strcmp(cmd, "uptime") == 0) {
+        builtin_uptime(args, n_args);
+    } else if (strcmp(cmd, "exit") == 0) {
+        builtin_exit(args, n_args);
     } else {
         return 0; // No es un comando propio
     }
@@ -176,5 +246,9 @@ int main(void) {
     }
 
     return 0;
+
+
+    
+
 }
 
