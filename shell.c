@@ -1,160 +1,180 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include "./libreria/linenoise.h"
 #include <unistd.h>
-#include <sys/wait.h>
+#include <string.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <errno.h>
+#include "./libreria/linenoise.h"
 
-#define PROMPT "$"
+#define PROMPT "$ "
 #define LONGITUD_HISTORIAL 1024
 #define MAX_ARGS 1024
 #define SEPARADOR_TOKEN " \t"
 #define PATH_MAX 4096
 
+// Variable global que guarda la ruta del directorio actual
 char CWD[PATH_MAX];
+
+/* ==================== Comandos propios implementados ==================== */
+
+// Refresca el directorio actual y lo guarda en la variable global CWD
+void refresh_cwd(void) {
+    if (getcwd(CWD, sizeof(CWD)) == NULL) {
+        perror("getcwd");
+        exit(1);
+    }
+}
+
+// Cambiar de directorio (cd)
+void builtin_cd(char **args, size_t n_args) {
+    if (n_args < 1) {
+        fprintf(stderr, "Uso: cd <directorio>\n");
+        return;
+    }
+    if (chdir(args[0]) != 0) {
+        perror("cd");
+        return;
+    }
+    refresh_cwd();
+}
+
+// Imprime el directorio actual (pwd)
+void builtin_pwd(char **args, size_t n_args) {
+    printf("%s\n", CWD);
+}
+
+// Lista archivos y directorios (ls)
+void builtin_ls(char **args, size_t n_args) {
+    DIR *d;
+    struct dirent *dir;
+    d = opendir(".");
+    if (!d) {
+        perror("ls");
+        return;
+    }
+    while ((dir = readdir(d)) != NULL) {
+        if (dir->d_name[0] != '.') { // omite archivos ocultos
+            printf("%s  ", dir->d_name);
+        }
+    }
+    printf("\n");
+    closedir(d);
+}
+
+// Borra archivos (rm)
+void builtin_rm(char **args, size_t n_args) {
+    if (n_args < 1) {
+        fprintf(stderr, "Uso: rm <archivo>\n");
+        return;
+    }
+    if (unlink(args[0]) != 0) {
+        perror("rm");
+    }
+}
+
+// Crea directorios (mkdir)
+void builtin_mkdir(char **args, size_t n_args) {
+    if (n_args < 1) {
+        fprintf(stderr, "Uso: mkdir <directorio>\n");
+        return;
+    }
+    if (mkdir(args[0], 0755) != 0) {
+        perror("mkdir");
+    }
+}
+
+// Borra directorios vacíos (rmdir)
+void builtin_rmdir(char **args, size_t n_args) {
+    if (n_args < 1) {
+        fprintf(stderr, "Uso: rmdir <directorio>\n");
+        return;
+    }
+    if (rmdir(args[0]) != 0) {
+        perror("rmdir");
+    }
+}
+
+// Llama a las funciones anteriores dependiendo del nombre del comando ingresado
+int ejecutar_comando_personalizado(char *cmd, char **args, size_t n_args) {
+    if (strcmp(cmd, "cd") == 0) {
+        builtin_cd(args, n_args);
+    } else if (strcmp(cmd, "pwd") == 0) {
+        builtin_pwd(args, n_args);
+    } else if (strcmp(cmd, "ls") == 0) {
+        builtin_ls(args, n_args);
+    } else if (strcmp(cmd, "rm") == 0) {
+        builtin_rm(args, n_args);
+    } else if (strcmp(cmd, "mkdir") == 0) {
+        builtin_mkdir(args, n_args);
+    } else if (strcmp(cmd, "rmdir") == 0) {
+        builtin_rmdir(args, n_args);
+    } else {
+        return 0; // No es un comando propio
+    }
+    return 1; // Sí fue un comando propio
+}
+
+/* ==================== Funciones del shell ==================== */
 
 /*
 divide una línea de texto en palabras o "tokens" separados
 por espacios o tabulaciones para identificar el comando a ejecutar
 y luego los almacena
 */
-int s_leer(char *input, char **args){
+int s_leer(char *input, char **args) {
     int i = 0;
     char *token = strtok(input, SEPARADOR_TOKEN);
 
-    while (token != NULL && i < (MAX_ARGS - 1)){
+    while (token != NULL && i < (MAX_ARGS - 1)) {
         args[i++] = token;
         token = strtok(NULL, SEPARADOR_TOKEN);
     }
 
-    args[i] = NULL; 
+    args[i] = NULL;
     return i;
 }
-//Ejecutar
-int s_ejecutar(char *cmd, char **cmd_args){
-    fprintf(stderr, "Ejecutando.....♪⁠〜⁠(⁠꒪⁠꒳⁠꒪⁠)⁠〜♪⁠ ´%s´\n", cmd);
-    int estado;
-    pid_t pid;
-    //fork() duplica la imagen de un proceso en la imagen del pc
-    //Se duplica un proceso shell (padre>0 e hijo=0)
-    pid = fork();
 
-    //Proceso hijo
-    if(pid < 0){
-        fprintf(stderr, "No fue posible ejecutarlo (⁠´⁠;⁠︵⁠;⁠`)\n");
-        return -1;
-    }
+/* ==================== Programa principal ==================== */
 
-    if (pid == 0){
-        //Ejecuta los comandos del sistema y busca en el path
-        //en caso de que sea una abreviación, reemplaza la imagen
-        //del proceso con un nuevo programa
-        execvp(cmd, cmd_args);
-    }else{
-        //Espera a que el hijo termine el proceso
-        if(waitpid (pid, &estado, 0) !=pid){
-        //El padre espera por el hijo
-        fprintf(stderr, "No fue posible esperar por el hijo ｡⁠:ﾟ⁠(⁠;⁠´⁠∩⁠`⁠;⁠)ﾟ⁠:⁠｡ -----(ಠ⁠_⁠ಠ)");
-        return -1;
-        }
-    }
-    return estado;
-}
-//Builtin
-typedef enum Builtin {
-    CD,
-    PWD,
-    INVALID
-} Builtin;
-
-void builtin_impl_cd(char **args, size_t n_args);
-void builtin_impl_pwd(char **args, size_t n_args);
-
-void (*BUILTIN_TABLE[]) (char **args, size_t n_args) = {
-  [CD] = builtin_impl_cd,
-  [PWD] = builtin_impl_pwd,
-};
-
-Builtin builtin_code(char *cmd) {
-  if (!strncmp(cmd, "cd", 2)) {
-    return CD;
-  } else if (!strncmp(cmd, "pwd", 3)) {
-    return PWD;
-  } else {
-    return INVALID;
-  }
-}
-
-int is_builtin(char *cmd) {
-  return builtin_code(cmd) != INVALID;
-}
-
-//ejecutar builtin
-void s_ejecutar_builtin(char *cmd, char **args, size_t n_args) {
-  BUILTIN_TABLE[builtin_code(cmd)](args, n_args);
-}
-
-void refresh_cwd(void) {
-  if (getcwd(CWD, sizeof(CWD)) == NULL) {
-    fprintf(stderr, "Error: No se pudo leer el directorio de trabajo");
-    exit(1);
-  }
-}
-
-void builtin_impl_cd(char **args, size_t n_args) {
-  char *new_dir = *args;
-  if (chdir(new_dir) != 0) {
-    fprintf(stderr, "Error: No se pudo cambiar el directorio \n");
-    //exit(1);
-  }
-  refresh_cwd();
-}
-
-void builtin_impl_pwd(char **args, size_t n_args) {
-  fprintf(stdout, "%s\n", CWD);
-}
-
-int main(void){
-    refresh_cwd();
+int main(void) {
+    refresh_cwd(); // Inicializa el directorio actual
 
     // Configura la longitud máxima del historial de comandos
-    if(!linenoiseHistorySetMaxLen(LONGITUD_HISTORIAL)){
-        fprintf(stderr, "No se pudo implementar un historial de linenoise (⁠´⁠;⁠︵⁠;⁠`) )");
+    if (!linenoiseHistorySetMaxLen(LONGITUD_HISTORIAL)) {
+        fprintf(stderr, "No se pudo configurar historial\n");
         exit(1);
     }
 
     char *linea;
-    //Definir el limite del arreglo
+    // Arreglo que almacena los tokens separados (comando y argumentos)
     char *args[MAX_ARGS];
 
     // Bucle principal del shell en donde se lee la entrada del usuario
-    while((linea = linenoise(PROMPT))!= NULL){
-        //Lectura
+    while ((linea = linenoise(PROMPT)) != NULL) {
+        // Lectura y tokenización
         int args_leidos = s_leer(linea, args);
 
-        fprintf(stdout, "Leyendo %d args\n", args_leidos);
-        for (int i = 0; i < args_leidos; i++) {
-          fprintf(stdout, "arg[%d] = %s\n", i, args[i]);
-        }
-
-        //Se salta las lineas vacias
+        // Salta líneas vacías
         if (args_leidos == 0) {
-          linenoiseFree(linea);
-        //ir al inicio del ciclo
-          continue;
+            linenoiseFree(linea);
+            continue;
         }
-        //Evaluación+impresión
 
-        // El primer token representa el comando (nombre del comando)
-        char *cmd = args [0];
-        char **cmd_args = args;
-    if (is_builtin(cmd)) {
-        s_ejecutar_builtin(cmd, (cmd_args+1), args_leidos-1);
-    } else {
-        s_ejecutar(cmd, cmd_args);
+        // El primer token representa el nombre del comando
+        char *cmd = args[0];
+        char **cmd_args = args + 1;
+        size_t n_args = args_leidos - 1;
+
+        // Ejecuta solo si el comando fue implementado
+        if (!ejecutar_comando_personalizado(cmd, cmd_args, n_args)) {
+            fprintf(stderr, "Error: comando no soportado\n");
+        }
+
+        linenoiseHistoryAdd(linea);  // Guarda en historial
+        linenoiseFree(linea);        // Libera la línea de entrada
     }
-        linenoiseHistoryAdd(linea);
-        linenoiseFree(linea);
-    }
+
     return 0;
 }
+
